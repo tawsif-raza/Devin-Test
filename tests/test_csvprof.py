@@ -127,3 +127,57 @@ def test_exactly_30_percent_not_flagged(tmp_path):
     df = pd.read_csv(data, skip_blank_lines=False)
     assert df["v"].isna().sum() == 3
     assert not csvprof.profile(df)["column_stats"][0]["flagged"]
+
+
+BOOL_EMPTY_CSV = (
+    "id,active,verified,blank,score\n"
+    "1,True,true,,10\n"
+    "2,False,,,20\n"
+    "3,True,false,,\n"
+    "4,False,TRUE,,30\n"
+)
+
+
+def test_boolean_columns(tmp_path, capsys):
+    data = tmp_path / "bools.csv"
+    data.write_text(BOOL_EMPTY_CSV)
+    cols = stats_by_name(csvprof.profile(pd.read_csv(data)))
+
+    # active: 4 values, none missing. verified: 3 values, 1 of 4 missing (25%).
+    for name, missing in [("active", 0), ("verified", 1)]:
+        assert cols[name]["type"] == "boolean"
+        assert cols[name]["missing"] == missing
+        assert not cols[name]["flagged"]
+        assert "min" not in cols[name]
+        assert "max" not in cols[name]
+        assert "mean" not in cols[name]
+
+    csvprof.main([str(data)])
+    lines = {line.split()[0]: line.split() for line in capsys.readouterr().out.splitlines() if line.strip()}
+    assert lines["active"] == ["active", "boolean", "0", "-", "-", "-"]
+    assert lines["verified"] == ["verified", "boolean", "1", "-", "-", "-"]
+
+
+def test_empty_column(tmp_path, capsys):
+    data = tmp_path / "blank.csv"
+    data.write_text(BOOL_EMPTY_CSV)
+    cols = stats_by_name(csvprof.profile(pd.read_csv(data)))
+
+    assert cols["blank"]["type"] == "empty"
+    assert cols["blank"]["missing"] == 4
+    assert cols["blank"]["flagged"]
+    assert "min" not in cols["blank"]
+    assert "max" not in cols["blank"]
+    assert "mean" not in cols["blank"]
+
+    # score: 10, 20, 30 with one missing -> min 10, max 30, mean 20.
+    assert cols["score"]["type"] == "number"
+    assert cols["score"]["missing"] == 1
+    assert cols["score"]["min"] == 10
+    assert cols["score"]["max"] == 30
+    assert cols["score"]["mean"] == 20
+
+    csvprof.main([str(data)])
+    lines = {line.split()[0]: line.split() for line in capsys.readouterr().out.splitlines() if line.strip()}
+    assert lines["blank"] == ["blank", "empty", "4", "-", "-", "-", "[FLAG:", ">30%", "empty]"]
+    assert lines["score"] == ["score", "number", "1", "10", "30", "20"]

@@ -12,6 +12,11 @@ FLAG_MARKER = "[FLAG: >30% empty]"
 
 
 def detect_type(col):
+    non_null = col.dropna()
+    if non_null.empty:
+        return "empty"
+    if all(pd.api.types.is_bool(v) for v in non_null):
+        return "boolean"
     if pd.api.types.is_numeric_dtype(col):
         return "number"
     try:
